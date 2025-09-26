@@ -1,0 +1,435 @@
+## Alerting Platform
+
+This document provides a comprehensive overview of the alerting-platform application, including its technical stack, architecture, API endpoints, and instructions for local setup and testing.
+
+### Overview
+The alerting-platform is a robust and scalable alerting and notification system built with Django and Django REST Framework. It is designed to manage and deliver customizable alerts to specific users, teams, or an entire organization. The application leverages a microservice-style architecture using Docker Compose to orchestrate its core components, including a web server, a PostgreSQL database, a Redis instance, and a Celery worker for background tasks.
+
+### Tech Stack
+- **Backend**: Django 5.2.6
+- **API Framework**: Django REST Framework 3.16.1
+- **Database**: PostgreSQL 15
+- **Task Queue**: Celery 5.5.3
+- **Message Broker**: Redis 7
+- **Containerization**: Docker & Docker Compose
+- **Configuration**: Python Decouple
+
+### Architecture
+The application is composed of several independent services managed by Docker Compose:
+- **web**: The main Django web server, serving the API endpoints and the admin interface.
+- **db**: A PostgreSQL database container for storing all application data.
+- **redis**: A Redis container that acts as the message broker for Celery, facilitating communication between the web server and the worker processes.
+- **celery**: A Celery worker container that processes long-running or periodic tasks, such as sending reminder notifications and cleaning up expired alerts.
+- **celery-beat**: A Celery beat scheduler container that schedules periodic tasks to be run by the worker, as defined in `core/celery.py`.
+
+### Endpoints & Functionality
+The API provides a set of RESTful endpoints for managing users, teams, alerts, and notifications.
+
+#### User & Team Management (`/api/users/`, `/api/users/teams/`)
+- **GET** `/api/users/`: List all users (admin-only).
+- **POST** `/api/users/`: Create a new user (admin-only).
+- **GET** `/api/users/me/`: Retrieve the profile of the currently logged-in user.
+- **GET** `/api/users/teams/`: List all teams (admin-only).
+- **POST** `/api/users/teams/`: Create a new team (admin-only).
+
+#### Alert Management (`/api/alerts/`)
+- **GET** `/api/alerts/`: List all alerts. Regular users see only relevant alerts, while admins see all.
+- **POST** `/api/alerts/`: Create a new alert (admin-only).
+- **GET** `/api/alerts/?severity=<severity>`: Filter alerts by severity (e.g., Critical, Warning, Info).
+- **GET** `/api/alerts/?status=<status>`: Filter alerts by status (e.g., active, expired).
+- **POST** `/api/alerts/<id>/send_now/`: Manually trigger an alert to be sent immediately (admin-only).
+
+#### User Preferences (`/api/alerts/preferences/`)
+- **GET** `/api/alerts/preferences/`: Retrieve the current user's alert preferences.
+- **POST** `/api/alerts/preferences/<id>/mark_read/`: Mark a specific alert preference as read.
+- **POST** `/api/alerts/preferences/<id>/mark_unread/`: Mark a specific alert preference as unread.
+- **POST** `/api/alerts/preferences/<id>/snooze/`: Snooze a specific alert for the day.
+- **POST** `/api/alerts/preferences/<id>/unsnooze/`: Remove the snooze status from an alert.
+
+#### Analytics & Delivery Logs
+- **GET** `/api/analytics/dashboard/`: Get system-wide or user-specific analytics based on the user's role.
+- **GET** `/api/delivery/notifications/`: View all notification delivery logs (admin-only).
+
+### Local Setup Guide
+Follow these steps to set up and run the application locally using Docker Compose.
+
+#### Prerequisites
+- Docker Desktop installed and running.
+- A code editor and terminal.
+
+#### 1. Clone the Repository
+Clone the project from its GitHub repository (if available) and navigate into the project directory.
+
+#### 2. Build and Run the Containers
+Run the following command to build the Docker images and start all the services:
+
+```bash
+docker-compose up --build -d
+```
+
+This command may take a few minutes to complete as it downloads dependencies and builds the images.
+
+#### 3. Initialize the Database
+Once the containers are running, apply the database migrations and create initial data.
+
+Run migrations to create the database schema:
+
+```bash
+docker-compose exec web python manage.py migrate
+```
+
+Create sample data for testing, including an admin user:
+
+```bash
+docker-compose exec web python manage.py setup_sample_data
+```
+
+#### 4. Access the Application
+- The Django web server will be running at [http://localhost:8000/](http://localhost:8000/).
+- The API endpoints at [http://localhost:8000/api/](http://localhost:8000/api/)
+- The Django admin panel at [http://localhost:8000/admin/](http://localhost:8000/admin/)
+
+### Postman Testing Workflow
+This section outlines the step-by-step process for testing the API endpoints using Postman.
+
+#### Phase 1: Initial Setup & Authentication
+All API endpoints are protected by Django Session Authentication. You must log in via the admin panel to obtain the session cookies (`sessionid` and `csrftoken`) required for all authenticated requests.
+
+1.1 Get CSRF Token
+- **Method**: GET
+- **URL**: `{{base_url}}/admin/login/`
+- **Description**: Obtain the initial `csrftoken` from the server's cookies.
+
+1.2 Admin Login
+- **Method**: POST
+- **URL**: `{{base_url}}/admin/login/`
+- **Headers**:
+  - `Content-Type: application/x-www-form-urlencoded`
+  - `X-CSRFToken: {{csrf_token}}`
+- **Body (x-www-form-urlencoded)**:
+  - `username: admin`
+  - `password: admin123`
+  - `csrfmiddlewaretoken: {{csrf_token}}`
+- **Description**: Logs in the admin user using the sample data credentials. A successful login sets the `sessionid` and `csrftoken` in Postman's cookie jar.
+
+1.3 Test Admin Access
+- **Method**: GET
+- **URL**: `{{base_url}}/api/users/`
+- **Headers**:
+  - `Cookie: sessionid={{admin_sessionid}}; csrftoken={{csrf_token}}`
+- **Description**: Verifies that the admin session is active and can access the admin-only user list endpoint.
+
+#### Phase 2: User & Team Management (Admin Only)
+2.1 Create Team
+- **Method**: POST
+- **URL**: `{{base_url}}/api/users/teams/`
+- **Headers**:
+  - `Content-Type: application/json`
+  - `Cookie: sessionid={{admin_sessionid}}; csrftoken={{csrf_token}}`
+  - `X-CSRFToken: {{csrf_token}}`
+- **Body (JSON)**:
+
+```json
+{
+  "name": "QA Team",
+  "description": "Quality Assurance Team"
+}
+```
+
+- **Description**: Creates a new team.
+
+2.2 List All Teams
+- **Method**: GET
+- **URL**: `{{base_url}}/api/users/teams/`
+- **Headers**:
+  - `Cookie: sessionid={{admin_sessionid}}; csrftoken={{csrf_token}}`
+- **Description**: Retrieves a list of all teams.
+
+2.3 Create New User
+- **Method**: POST
+- **URL**: `{{base_url}}/api/users/`
+- **Headers**:
+  - `Content-Type: application/json`
+  - `Cookie: sessionid={{admin_sessionid}}; csrftoken={{csrf_token}}`
+  - `X-CSRFToken: {{csrf_token}}`
+- **Body (JSON)**:
+
+```json
+{
+  "username": "test_user",
+  "email": "test@company.com",
+  "first_name": "Test",
+  "last_name": "User",
+  "password": "testpassword123",
+  "team_id": "{{team_id}}",
+  "is_admin": false
+}
+```
+
+- **Description**: Creates a new, non-admin user associated with a specific team.
+
+2.4 List All Users
+- **Method**: GET
+- **URL**: `{{base_url}}/api/users/`
+- **Headers**:
+  - `Cookie: sessionid={{admin_sessionid}}; csrftoken={{csrf_token}}`
+- **Description**: Retrieves a list of all users, as an admin user has full access.
+
+#### Phase 3: Alert Management (Admin)
+3.1 Create Organization-Wide Alert
+- **Method**: POST
+- **URL**: `{{base_url}}/api/alerts/`
+- **Headers**:
+  - `Content-Type: application/json`
+  - `Cookie: sessionid={{admin_sessionid}}; csrftoken={{csrf_token}}`
+  - `X-CSRFToken: {{csrf_token}}`
+- **Body (JSON)**:
+
+```json
+{
+  "title": "System Maintenance Alert",
+  "message": "The system will be down for maintenance from 2AM to 4AM EST.",
+  "severity": "Critical",
+  "delivery_type": "InApp",
+  "visibility_type": "Organization",
+  "start_time": "2024-01-01T00:00:00Z",
+  "expiry_time": "2024-12-31T23:59:59Z",
+  "reminder_frequency": 120,
+  "reminder_enabled": true,
+  "is_active": true
+}
+```
+
+- **Description**: Creates an alert visible to all users.
+
+3.2 Create Team-Specific Alert
+- **Method**: POST
+- **URL**: `{{base_url}}/api/alerts/`
+- **Headers**:
+  - `Content-Type: application/json`
+  - `Cookie: sessionid={{admin_sessionid}}; csrftoken={{csrf_token}}`
+  - `X-CSRFToken: {{csrf_token}}`
+- **Body (JSON)**:
+
+```json
+{
+  "title": "Engineering Team Alert",
+  "message": "Please review the latest code changes before EOD.",
+  "severity": "Warning",
+  "delivery_type": "InApp",
+  "visibility_type": "Team",
+  "visible_to_team_ids": ["{{engineering_team_id}}"],
+  "start_time": "2024-01-01T00:00:00Z",
+  "expiry_time": "2024-12-31T23:59:59Z",
+  "reminder_frequency": 120,
+  "reminder_enabled": true,
+  "is_active": true
+}
+```
+
+- **Description**: Creates an alert visible only to members of a specific team.
+
+3.3 Create User-Specific Alert
+- **Method**: POST
+- **URL**: `{{base_url}}/api/alerts/`
+- **Headers**:
+  - `Content-Type: application/json`
+  - `Cookie: sessionid={{admin_sessionid}}; csrftoken={{csrf_token}}`
+  - `X-CSRFToken: {{csrf_token}}`
+- **Body (JSON)**:
+
+```json
+{
+  "title": "Personal Reminder",
+  "message": "Don't forget to submit your timesheet.",
+  "severity": "Info",
+  "delivery_type": "InApp",
+  "visibility_type": "User",
+  "visible_to_user_ids": ["{{user_id}}"],
+  "start_time": "2024-01-01T00:00:00Z",
+  "expiry_time": "2024-12-31T23:59:59Z",
+  "reminder_frequency": 120,
+  "reminder_enabled": true,
+  "is_active": true
+}
+```
+
+- **Description**: Creates an alert visible to a single user.
+
+3.4 List All Alerts (Admin View)
+- **Method**: GET
+- **URL**: `{{base_url}}/api/alerts/`
+- **Headers**:
+  - `Cookie: sessionid={{admin_sessionid}}; csrftoken={{csrf_token}}`
+- **Description**: Retrieves all alerts in the system.
+
+3.5 Filter Alerts by Severity
+- **Method**: GET
+- **URL**: `{{base_url}}/api/alerts/?severity=Critical`
+- **Headers**:
+  - `Cookie: sessionid={{admin_sessionid}}; csrftoken={{csrf_token}}`
+- **Description**: Filters alerts by severity.
+
+3.6 Filter Alerts by Status
+- **Method**: GET
+- **URL**: `{{base_url}}/api/alerts/?status=active`
+- **Headers**:
+  - `Cookie: sessionid={{admin_sessionid}}; csrftoken={{csrf_token}}`
+- **Description**: Filters alerts by their current status.
+
+3.7 Update Alert
+- **Method**: PUT
+- **URL**: `{{base_url}}/api/alerts/{{alert_id}}/`
+- **Headers**:
+  - `Content-Type: application/json`
+  - `Cookie: sessionid={{admin_sessionid}}; csrftoken={{csrf_token}}`
+  - `X-CSRFToken: {{csrf_token}}`
+- **Body (JSON)**:
+
+```json
+{
+  "title": "Updated System Maintenance Alert",
+  "message": "Updated: The system will be down from 1AM to 3AM EST.",
+  "severity": "Critical",
+  "delivery_type": "InApp",
+  "visibility_type": "Organization",
+  "start_time": "2024-01-01T00:00:00Z",
+  "expiry_time": "2024-12-31T23:59:59Z",
+  "reminder_frequency": 60,
+  "reminder_enabled": true,
+  "is_active": true
+}
+```
+
+- **Description**: Updates an existing alert's details.
+
+3.8 Manual Alert Trigger
+- **Method**: POST
+- **URL**: `{{base_url}}/api/alerts/{{alert_id}}/send_now/`
+- **Headers**:
+  - `Cookie: sessionid={{admin_sessionid}}; csrftoken={{csrf_token}}`
+  - `X-CSRFToken: {{csrf_token}}`
+- **Description**: Manually triggers the notification sending process for a specific alert.
+
+#### Phase 4: User Authentication & Testing
+4.1 Regular User Login
+- **Method**: POST
+- **URL**: `{{base_url}}/admin/login/`
+- **Headers**:
+  - `Content-Type: application/x-www-form-urlencoded`
+  - `X-CSRFToken: {{csrf_token}}`
+- **Body (x-www-form-urlencoded)**:
+  - `username: john_doe`
+  - `password: password123`
+  - `csrfmiddlewaretoken: {{csrf_token}}`
+- **Description**: Logs in a regular user to obtain their session cookies.
+
+#### Phase 5: User Alert Management
+5.1 Get User's Alerts
+- **Method**: GET
+- **URL**: `{{base_url}}/api/alerts/`
+- **Headers**:
+  - `Cookie: sessionid={{user_sessionid}}; csrftoken={{csrf_token}}`
+- **Description**: Retrieves alerts relevant to the regular user, including organization-wide and team-specific alerts.
+
+5.2 Get User's Alert Preferences
+- **Method**: GET
+- **URL**: `{{base_url}}/api/alerts/preferences/`
+- **Headers**:
+  - `Cookie: sessionid={{user_sessionid}}; csrftoken={{csrf_token}}`
+- **Description**: Retrieves the user's personal preferences for each alert they have received.
+
+5.3 Mark Alert as Read
+- **Method**: POST
+- **URL**: `{{base_url}}/api/alerts/preferences/{{preference_id}}/mark_read/`
+- **Headers**:
+  - `Cookie: sessionid={{user_sessionid}}; csrftoken={{csrf_token}}`
+  - `X-CSRFToken: {{csrf_token}}`
+- **Description**: Changes the status of an alert to "read" for the current user.
+
+5.4 Mark Alert as Unread
+- **Method**: POST
+- **URL**: `{{base_url}}/api/alerts/preferences/{{preference_id}}/mark_unread/`
+- **Headers**:
+  - `Cookie: sessionid={{user_sessionid}}; csrftoken={{csrf_token}}`
+  - `X-CSRFToken: {{csrf_token}}`
+- **Description**: Changes the status of an alert to "unread".
+
+5.5 Snooze Alert for Day
+- **Method**: POST
+- **URL**: `{{base_url}}/api/alerts/preferences/{{preference_id}}/snooze/`
+- **Headers**:
+  - `Cookie: sessionid={{user_sessionid}}; csrftoken={{csrf_token}}`
+  - `X-CSRFToken: {{csrf_token}}`
+- **Description**: Snoozes an alert, preventing reminders until the next day.
+
+5.6 Unsnooze Alert
+- **Method**: POST
+- **URL**: `{{base_url}}/api/alerts/preferences/{{preference_id}}/unsnooze/`
+- **Headers**:
+  - `Cookie: sessionid={{user_sessionid}}; csrftoken={{csrf_token}}`
+  - `X-CSRFToken: {{csrf_token}}`
+- **Description**: Removes the snooze status from an alert.
+
+5.7 Get Current User Profile
+- **Method**: GET
+- **URL**: `{{base_url}}/api/users/me/`
+- **Headers**:
+  - `Cookie: sessionid={{user_sessionid}}; csrftoken={{csrf_token}}`
+- **Description**: Retrieves the profile of the currently logged-in user.
+
+#### Phase 6: Analytics & Reporting
+6.1 Admin Analytics Dashboard
+- **Method**: GET
+- **URL**: `{{base_url}}/api/analytics/dashboard/`
+- **Headers**:
+  - `Cookie: sessionid={{admin_sessionid}}; csrftoken={{csrf_token}}`
+- **Description**: Provides a comprehensive, system-wide analytics report, accessible only to admins.
+
+6.2 User Analytics Dashboard
+- **Method**: GET
+- **URL**: `{{base_url}}/api/analytics/dashboard/`
+- **Headers**:
+  - `Cookie: sessionid={{user_sessionid}}; csrftoken={{csrf_token}}`
+- **Description**: Retrieves analytics specific to the logged-in user.
+
+6.3 Delivery Logs (Admin Only)
+- **Method**: GET
+- **URL**: `{{base_url}}/api/delivery/notifications/`
+- **Headers**:
+  - `Cookie: sessionid={{admin_sessionid}}; csrftoken={{csrf_token}}`
+- **Description**: Retrieves a read-only view of all notification delivery records.
+
+#### Phase 7: Advanced Testing
+7.1 Test Permission Restrictions
+- **Method**: POST
+- **URL**: `{{base_url}}/api/alerts/`
+- **Headers**:
+  - `Cookie: sessionid={{user_sessionid}}; csrftoken={{csrf_token}}`
+- **Description**: Attempt to create an alert as a regular user. This should result in a `403 Forbidden` response.
+
+7.2 Test Pagination
+- **Method**: GET
+- **URL**: `{{base_url}}/api/alerts/?page=1&page_size=5`
+- **Headers**:
+  - `Cookie: sessionid={{admin_sessionid}}; csrftoken={{csrf_token}}`
+- **Description**: Tests the pagination functionality, which is enabled by default in the Django REST Framework settings.
+
+7.3 Test Invalid Data Handling
+- **Method**: POST
+- **URL**: `{{base_url}}/api/alerts/`
+- **Headers**:
+  - `Content-Type: application/json`
+  - `Cookie: sessionid={{admin_sessionid}}; csrftoken={{csrf_token}}`
+  - `X-CSRFToken: {{csrf_token}}`
+- **Body (JSON)**:
+
+```json
+{
+  "title": "",
+  "severity": "InvalidSeverity",
+  "expiry_time": "invalid-date"
+}
+```
+
+- **Description**: Tests how the API handles requests with invalid data, expecting a `400 Bad Request` response with validation errors.
